@@ -1,1 +1,70 @@
+import pygame
+import math
 
+pygame.init()
+win = pygame.display.set_mode((600, 600))
+
+
+JASNY_NIEBIESKI = (0, 255, 255)
+CZERWONY = (255, 0, 0)
+CZARNY = (0, 0, 0)
+
+przesuniecie_x = 0
+przesuniecie_y = 0
+skala = 1.0
+rotacja = 0.0
+
+run = True
+while run:
+    for event in pygame.event.get():
+        if event.type == pygame.QUIT:
+            run = False
+
+        if event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_1:
+                przesuniecie_x -= 20
+            elif event.key == pygame.K_2:
+                przesuniecie_x += 20
+            elif event.key == pygame.K_3:
+                przesuniecie_y -= 20
+            elif event.key == pygame.K_4:
+                przesuniecie_y += 20
+            elif event.key == pygame.K_5:
+                skala += 0.2
+            elif event.key == pygame.K_6:
+                skala -= 0.2
+            elif event.key == pygame.K_7:
+                rotacja += 0.2
+            elif event.key == pygame.K_8:
+                rotacja -= 0.2
+            elif event.key == pygame.K_9:
+                przesuniecie_x = 0
+                przesuniecie_y = 0
+                skala = 1.0
+                rotacja = 0.0
+
+    win.fill(CZARNY)
+
+    n = 19
+    
+    aktualny_promien = 150 * skala
+
+    srodek_x = 300 + przesuniecie_x
+    srodek_y = 300 + przesuniecie_y
+
+    punkty = []
+    for i in range(n):
+
+        kat = i * (2 * math.pi / n) + rotacja
+
+        x = srodek_x + aktualny_promien * math.cos(kat)
+        y = srodek_y + aktualny_promien * math.sin(kat)
+        punkty.append((x, y))
+
+    pygame.draw.polygon(win, JASNY_NIEBIESKI, punkty, 3)
+
+    pygame.draw.circle(win, CZERWONY, (300, 300), 50)
+
+    pygame.display.update()
+
+pygame.quit()
