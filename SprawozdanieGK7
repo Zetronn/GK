@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wieża Hanoi - Three.js</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #f0f0f0; }
+        canvas { display: block; }
+    </style>
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+        }
+    }
+    </script>
+</head>
+<body>
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0xadd8e6);
+
+        const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.1, 200);
+        camera.position.set(0, 8, 18);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(innerWidth, innerHeight);
+        renderer.shadowMap.enabled = true;
+        document.body.appendChild(renderer.domElement);
+
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+
+        scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+        const sun = new THREE.DirectionalLight(0xffffff, 1);
+        sun.position.set(10, 20, 10);
+        sun.castShadow = true;
+        scene.add(sun);
+
+        const baseGeo = new THREE.BoxGeometry(16, 1, 4);
+        const woodMat = new THREE.MeshStandardMaterial({ color: 0xcd853f, roughness: 0.8 });
+        const base = new THREE.Mesh(baseGeo, woodMat);
+        base.position.y = -0.5;
+        base.receiveShadow = true;
+        scene.add(base);
+
+        const pegPositions = [-5, 0, 5];
+        const pegsInfo = [[], [], []];
+        const pegGeo = new THREE.CylinderGeometry(0.2, 0.2, 6);
+        
+        for (let i = 0; i < 3; i++) {
+            const peg = new THREE.Mesh(pegGeo, woodMat);
+            peg.position.set(pegPositions[i], 3, 0);
+            peg.castShadow = true;
+            peg.receiveShadow = true;
+            scene.add(peg);
+        }
+
+        const colors = [0xff0000, 0x00cc00, 0x3399ff, 0xffff00];
+        const disksInfo = [];
+        
+        for (let i = 0; i < 4; i++) {
+            const radius = 2.5 - i * 0.5;
+            const diskGeo = new THREE.CylinderGeometry(radius, radius, 1);
+            const diskMat = new THREE.MeshStandardMaterial({ color: colors[i], roughness: 0.5, metalness: 0.1 });
+            const disk = new THREE.Mesh(diskGeo, diskMat);
+            
+            disk.castShadow = true;
+            disk.receiveShadow = true;
+            
+            const yPos = i * 1 + 0.5;
+            disk.position.set(pegPositions[0], yPos, 0);
+            scene.add(disk);
+            
+            pegsInfo[0].push(disk);
+            disksInfo.push(disk);
+        }
+
+        const moves = [];
+        function calculateHanoiMoves(n, source, target, auxiliary) {
+            if (n > 0) {
+                calculateHanoiMoves(n - 1, source, auxiliary, target);
+                moves.push({ from: source, to: target });
+                calculateHanoiMoves(n - 1, auxiliary, target, source);
+            }
+        }
+        calculateHanoiMoves(4, 0, 2, 1);
+
+        let currentMove = null;
+        let animState = 0;
+        const moveSpeed = 8;
+        const clearanceHeight = 7;
+
+        const clock = new THREE.Clock();
+
+        function animate() {
+            requestAnimationFrame(animate);
+            const delta = clock.getDelta();
+
+            if (!currentMove && moves.length > 0) {
+                const moveObj = moves.shift();
+                const diskToMove = pegsInfo[moveObj.from].pop();
+                
+                currentMove = {
+                    disk: diskToMove,
+                    from: moveObj.from,
+                    to: moveObj.to,
+                    targetX: pegPositions[moveObj.to],
+                    targetY: pegsInfo[moveObj.to].length * 1 + 0.5
+                };
+                
+                pegsInfo[moveObj.to].push(diskToMove);
+                animState = 1;
+            }
+
+            if (currentMove) {
+                const disk = currentMove.disk;
+                
+                if (animState === 1) {
+                    disk.position.y += moveSpeed * delta;
+                    if (disk.position.y >= clearanceHeight) {
+                        disk.position.y = clearanceHeight;
+                        animState = 2;
+                    }
+                } 
+                else if (animState === 2) {
+                    const dir = Math.sign(currentMove.targetX - disk.position.x);
+                    disk.position.x += dir * moveSpeed * delta;
+                    
+                    if ((dir > 0 && disk.position.x >= currentMove.targetX) || (dir < 0 && disk.position.x <= currentMove.targetX)) {
+                        disk.position.x = currentMove.targetX;
+                        animState = 3;
+                    }
+                } 
+                else if (animState === 3) {
+                    disk.position.y -= moveSpeed * delta;
+                    if (disk.position.y <= currentMove.targetY) {
+                        disk.position.y = currentMove.targetY;
+                        currentMove = null;
+                        animState = 0;
+                    }
+                }
+            }
+
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        animate();
+        
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
