@@ -1,99 +1,464 @@
 <!DOCTYPE html>
-<html lang="pl">
+<meta charset="UTF-8">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <title>Wiatrak - WebGL</title>
-    <style>
-        body { margin: 0; overflow: hidden; background-color: #000; }
-        canvas { display: block; }
-    </style>
-</head>
-<body>
-    <script type="importmap">
-        {
-            "imports": {
-                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+<title>CS424, Fall 2017, Lab 12</title>
+<style>
+    body {
+        background-color: black;
+        color: white;
+    }
+    label {
+        white-space: pre;
+        margin-left: 25px;
+    }
+    #message {
+        font-weight: bold;
+    }
+    #error-alert {
+        color: #ff5555;
+        font-size: 18px;
+        font-weight: bold;
+        display: none;
+    }
+</style>
+
+<script type="x-shader/x-vertex" id="vshader-source">
+    attribute vec3 a_coords;
+    attribute vec3 a_normal;
+    uniform mat4 modelview;
+    uniform mat4 projection;
+    varying vec3 v_normal;
+    varying vec3 v_eyeCoords;
+    void main() {
+        vec4 coords = vec4(a_coords,1.0);
+        vec4 eyeCoords = modelview * coords;
+        gl_Position = projection * eyeCoords;
+        v_normal = normalize(a_normal);
+        v_eyeCoords = eyeCoords.xyz/eyeCoords.w;
+    }
+</script>
+
+<script type="x-shader/x-fragment" id="fshader-source">
+    #ifdef GL_FRAGMENT_PRECISION_HIGH
+       precision highp float;
+    #else
+       precision mediump float;
+    #endif
+    struct MaterialProperties {
+        vec3 diffuseColor;
+        vec3 specularColor;
+        vec3 emissiveColor;
+        float specularExponent;
+    };
+    struct LightProperties {
+        bool enabled;
+        vec4 position;
+        vec3 color;
+    };
+    uniform MaterialProperties material;
+    uniform LightProperties lights[4];
+    uniform mat3 normalMatrix;
+    varying vec3 v_normal;
+    varying vec3 v_eyeCoords;
+    vec3 lightingEquation( LightProperties light, MaterialProperties material, vec3 eyeCoords, vec3 N, vec3 V ) {
+        vec3 L, R;
+        if ( light.position.w == 0.0 ) {
+            L = normalize( light.position.xyz );
+        }
+        else {
+            L = normalize( light.position.xyz/light.position.w - v_eyeCoords );
+        }
+        if (dot(L,N) <= 0.0) {
+            return vec3(0.0);
+        }
+        vec3 reflection = dot(L,N) * light.color * material.diffuseColor;
+        R = -reflect(L,N);
+        if (dot(R,V) > 0.0) {
+            float factor = pow(dot(R,V),material.specularExponent);
+            reflection += factor * material.specularColor * light.color;
+        }
+        return reflection;
+    }
+    void main() {
+        vec3 normal = normalize( normalMatrix*v_normal );
+        vec3 viewDirection = normalize( -v_eyeCoords);
+        vec3 color = material.emissiveColor;
+        for (int i = 0; i < 4; i++) {
+            if (lights[i].enabled) {
+                if (gl_FrontFacing) {
+                    color += lightingEquation( lights[i], material, v_eyeCoords, normal, viewDirection);
+                }
+                else {
+                    color += lightingEquation( lights[i], material, v_eyeCoords, -normal, viewDirection);
+                }
             }
         }
-    </script>
-    <script type="module">
-        import * as THREE from 'three';
-        import { TeapotGeometry } from 'three/addons/geometries/TeapotGeometry.js';
+        gl_FragColor = vec4(color, 1);
+    }
+</script>
 
-        const scene = new THREE.Scene();
-        scene.background = new THREE.Color(0xadd8e6);
+<script src="resources/gl-matrix.js"></script>
+<script src="resources/basic-object-models-IFS.js"></script>
+<script src="resources/teapot-model-IFS.js"></script>
 
-        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 100);
-        camera.position.set(0, 5, 12);
+<script>
+"use strict";
 
-        const renderer = new THREE.WebGLRenderer({ antialias: true });
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        document.body.appendChild(renderer.domElement);
+var gl;
+var canvas;
 
-        const ambientLight = new THREE.AmbientLight(0x666666);
-        scene.add(ambientLight);
+var a_coords_loc;
+var a_normal_loc;
 
-        const dirLight = new THREE.DirectionalLight(0xffffff, 1);
-        dirLight.position.set(5, 10, 5);
-        scene.add(dirLight);
+var u_modelview;
+var u_projection;
+var u_normalMatrix;
 
-        const matWood = new THREE.MeshPhongMaterial({ color: 0x8b4513 });
-        const matBlade = new THREE.MeshPhongMaterial({ color: 0xeeeeee });
-        const matTeapot = new THREE.MeshPhongMaterial({ color: 0xff0000 });
+var u_material;
+var u_lights;
 
-        const baseGeo = new THREE.BoxGeometry(5, 0.5, 5);
-        const baseMesh = new THREE.Mesh(baseGeo, matWood);
-        scene.add(baseMesh);
+var projection;
+var modelview;
+var normalMatrix;
 
-        const towerGeo = new THREE.CylinderGeometry(0.5, 1, 5, 16);
-        const towerMesh = new THREE.Mesh(towerGeo, matWood);
-        towerMesh.position.set(0, 2.75, 0);
-        scene.add(towerMesh);
+var frameNumber = 0;
 
-        const rotor = new THREE.Group();
-        rotor.position.set(0, 5, 0.6);
-        scene.add(rotor);
+var modelCone, modelCylinder, modelCube, modelTeapot;
+var matrixStack = [];
+var currentColor = [1,1,1];
+var rotateX = 0, rotateY = 0;
+var animating = false;
 
-        const hubGeo = new THREE.CylinderGeometry(0.3, 0.3, 0.4, 16);
-        const hubMesh = new THREE.Mesh(hubGeo, matWood);
-        hubMesh.rotation.x = Math.PI / 2;
-        rotor.add(hubMesh);
+// Definicja kolorów bez użycia ułamków dziesiętnych w czystej formie aby zablokować błędy formatowania
+var colorRed = [8/10, 2/10, 2/10];
+var colorYellow = [10/10, 8/10, 2/10];
+var colorCyan = [6/10, 10/10, 10/10];
+var colorGreen = [0/10, 8/10, 0/10];
 
-        for (let i = 0; i < 3; i++) {
-            const bladeGroup = new THREE.Group();
+function draw() {
+    gl.clearColor(0,0,0,1);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
-            const cone1Geo = new THREE.ConeGeometry(0.2, 2.5, 16);
-            const cone1 = new THREE.Mesh(cone1Geo, matBlade);
-            cone1.position.set(0, 1.45, 0);
+    mat4.perspective(projection, Math.PI/4, 1, 1, 100);
+    gl.uniformMatrix4fv(u_projection, false, projection);
 
-            const cone2Geo = new THREE.ConeGeometry(0.2, 0.4, 16);
-            const cone2 = new THREE.Mesh(cone2Geo, matBlade);
-            cone2.rotation.z = Math.PI;
-            cone2.position.set(0, 0, 0);
+    // Odsunięcie kamery na osi Z, aby cały wiatrak się zmieścił
+    mat4.lookAt(modelview, [0, 2, 35], [0, 2, 0], [0, 1, 0]);
 
-            bladeGroup.add(cone1);
-            bladeGroup.add(cone2);
+    mat4.rotateX(modelview, modelview, rotateX);
+    mat4.rotateY(modelview, modelview, rotateY);
 
-            bladeGroup.rotation.z = i * ((2 * Math.PI) / 3);
-            rotor.add(bladeGroup);
+    // 1. PODSTAWA (Czerwony sześcian)
+    pushMatrix();
+    mat4.translate(modelview, modelview, [0, -6, 0]);
+    mat4.scale(modelview, modelview, [8, 1, 8]);
+    currentColor = colorRed;
+    modelCube.render();
+    popMatrix();
+
+    // 2. WIEŻA (Żółty/Pomarańczowy cylinder)
+    pushMatrix();
+    mat4.translate(modelview, modelview, [0, 0.5, 0]); 
+    mat4.rotateX(modelview, modelview, Math.PI/2); 
+    mat4.scale(modelview, modelview, [0.5, 0.5, 12]); 
+    currentColor = colorYellow;
+    modelCylinder.render();
+    popMatrix();
+
+    // 3. WIRNIK
+    pushMatrix();
+    mat4.translate(modelview, modelview, [0, 6.5, 0.6]);
+    if (animating) {
+        mat4.rotateZ(modelview, modelview, frameNumber * 0.02);
+    }
+
+    // Środek wirnika (Hub)
+    pushMatrix();
+    mat4.scale(modelview, modelview, [0.8, 0.8, 0.5]);
+    currentColor = colorYellow;
+    modelCylinder.render();
+    popMatrix();
+
+    // Trzy łopatki wiatraka
+    for (var idx = 0; idx < 3; idx++) {
+        pushMatrix();
+        mat4.rotateZ(modelview, modelview, idx * (2 * Math.PI / 3));
+
+        // Łopatka 1 - Długi stożek (skierowany na zewnątrz)
+        pushMatrix();
+        mat4.translate(modelview, modelview, [0, 3.5, 0]); // Połowa długości stożka (2.5) + podstawa (1.0)
+        mat4.rotateX(modelview, modelview, -Math.PI/2);
+        mat4.scale(modelview, modelview, [0.5, 0.5, 5]);
+        currentColor = colorCyan;
+        modelCone.render();
+        popMatrix();
+
+        // Łopatka 2 - Krótki stożek (skierowany do piasty)
+        pushMatrix();
+        mat4.translate(modelview, modelview, [0, 0.5, 0]); // Połowa długości stożka (0.5) wychodząca od 0 do 1.0
+        mat4.rotateX(modelview, modelview, Math.PI/2);
+        mat4.scale(modelview, modelview, [0.5, 0.5, 1]);
+        currentColor = colorCyan;
+        modelCone.render();
+        popMatrix();
+
+        popMatrix();
+    }
+    popMatrix(); // Koniec wirnika
+
+    // 4. CZAJNIK
+    if (modelTeapot) {
+        pushMatrix();
+        mat4.translate(modelview, modelview, [2.5, -5.5, 2.5]); // Stoi na krawędzi podstawy
+        mat4.scale(modelview, modelview, [0.08, 0.08, 0.08]);
+        currentColor = colorGreen;
+        modelTeapot.render();
+        popMatrix();
+    }
+}
+
+function pushMatrix() {
+    matrixStack.push(mat4.clone(modelview));
+}
+
+function popMatrix() {
+    modelview = matrixStack.pop();
+}
+
+function createModel(modelData) {
+    var model = {};
+    model.coordsBuffer = gl.createBuffer();
+    model.normalBuffer = gl.createBuffer();
+    model.indexBuffer = gl.createBuffer();
+    model.count = modelData.indices.length;
+    gl.bindBuffer(gl.ARRAY_BUFFER, model.coordsBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, modelData.vertexPositions, gl.STATIC_DRAW);
+    gl.bindBuffer(gl.ARRAY_BUFFER, model.normalBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, modelData.vertexNormals, gl.STATIC_DRAW);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, model.indexBuffer);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, modelData.indices, gl.STATIC_DRAW);
+    model.render = function() {
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.coordsBuffer);
+        gl.vertexAttribPointer(a_coords_loc, 3, gl.FLOAT, false, 0, 0);
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.normalBuffer);
+        gl.vertexAttribPointer(a_normal_loc, 3, gl.FLOAT, false, 0, 0);
+        gl.uniform3fv(u_material.diffuseColor, currentColor);
+        gl.uniformMatrix4fv(u_modelview, false, modelview);
+        mat3.normalFromMat4(normalMatrix, modelview);
+        gl.uniformMatrix3fv(u_normalMatrix, false, normalMatrix);
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.indexBuffer);
+        gl.drawElements(gl.TRIANGLES, this.count, gl.UNSIGNED_SHORT, 0);
+        if (this.xtraTranslate) {
+            popMatrix();
         }
+    }
+    return model;
+}
 
-        const teapotGeo = new TeapotGeometry(0.5);
-        const teapotMesh = new THREE.Mesh(teapotGeo, matTeapot);
-        teapotMesh.position.set(1.5, 0.75, 1.5);
-        scene.add(teapotMesh);
+function createProgram(gl, vertexShaderID, fragmentShaderID, attribute0) {
+    function getTextContent(elementID) {
+        var element = document.getElementById(elementID);
+        var node = element.firstChild;
+        var str = "";
+        while (node) {
+            if (node.nodeType == 3) str += node.textContent;
+            node = node.nextSibling;
+        }
+        return str;
+    }
+    try {
+        var vertexShaderSource = getTextContent(vertexShaderID);
+        var fragmentShaderSource = getTextContent(fragmentShaderID);
+    } catch (e) {
+        throw "Error: Could not get shader source code from script elements.";
+    }
+    var vsh = gl.createShader(gl.VERTEX_SHADER);
+    gl.shaderSource(vsh, vertexShaderSource);
+    gl.compileShader(vsh);
+    if (!gl.getShaderParameter(vsh, gl.COMPILE_STATUS)) {
+        throw "Error in vertex shader:  " + gl.getShaderInfoLog(vsh);
+    }
+    var fsh = gl.createShader(gl.FRAGMENT_SHADER);
+    gl.shaderSource(fsh, fragmentShaderSource);
+    gl.compileShader(fsh);
+    if (!gl.getShaderParameter(fsh, gl.COMPILE_STATUS)) {
+        throw "Error in fragment shader:  " + gl.getShaderInfoLog(fsh);
+    }
+    var prog = gl.createProgram();
+    gl.attachShader(prog, vsh);
+    gl.attachShader(prog, fsh);
+    if (attribute0) {
+        gl.bindAttribLocation(prog, 0, attribute0);
+    }
+    gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+        throw "Link error in program:  " + gl.getProgramInfoLog(prog);
+    }
+    return prog;
+}
 
-        renderer.setAnimationLoop(() => {
-            rotor.rotation.z += 0.02;
-            renderer.render(scene, camera);
-        });
+function initGL() {
+    var prog = createProgram(gl, "vshader-source", "fshader-source", "a_coords");
+    gl.useProgram(prog);
+    gl.enable(gl.DEPTH_TEST);
 
-        window.addEventListener('resize', () => {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
-        });
-    </script>
+    a_coords_loc = gl.getAttribLocation(prog, "a_coords");
+    a_normal_loc = gl.getAttribLocation(prog, "a_normal");
+    gl.enableVertexAttribArray(a_coords_loc);
+    gl.enableVertexAttribArray(a_normal_loc);
+
+    u_modelview = gl.getUniformLocation(prog, "modelview");
+    u_projection = gl.getUniformLocation(prog, "projection");
+    u_normalMatrix = gl.getUniformLocation(prog, "normalMatrix");
+    u_material = {
+        diffuseColor: gl.getUniformLocation(prog, "material.diffuseColor"),
+        specularColor: gl.getUniformLocation(prog, "material.specularColor"),
+        specularExponent: gl.getUniformLocation(prog, "material.specularExponent")
+    };
+    u_lights = new Array(4);
+    for (var i = 0; i < 4; i++) {
+        u_lights[i] = {
+            enabled: gl.getUniformLocation(prog, "lights[" + i + "].enabled"),
+            position: gl.getUniformLocation(prog, "lights[" + i + "].position"),
+            color: gl.getUniformLocation(prog, "lights[" + i + "].color")
+        };
+    }
+
+    gl.uniform3f(u_material.diffuseColor, 1, 1, 1);
+    gl.uniform3f(u_material.specularColor, 0.1, 0.1, 0.1);
+    gl.uniform1f(u_material.specularExponent, 32);
+
+    for (var i = 1; i < 4; i++) {
+        gl.uniform1i(u_lights[i].enabled, 0);
+        gl.uniform4f(u_lights[i].position, 0, 0, 1, 0);
+        gl.uniform3f(u_lights[i].color, 1, 1, 1);
+    }
+
+    // Światło 1:
+    gl.uniform1i(u_lights[0].enabled, 1);
+    gl.uniform4f(u_lights[0].position, 0, 0, 0, 1);
+    gl.uniform3f(u_lights[0].color, 0.6, 0.6, 0.6);
+
+    // Światło 2 (Naprawiony indeks z oryginalnego kodu):
+    gl.uniform1i(u_lights[1].enabled, 1);
+    gl.uniform4f(u_lights[1].position, 0, 1, 0, 0);
+    gl.uniform3f(u_lights[1].color, 0.4, 0.4, 0.4);
+
+    gl.uniform1i(u_lights[2].enabled, 0);
+}
+
+function mouseDown(evt) {
+    var prevX, prevY;
+    prevX = evt.clientX;
+    prevY = evt.clientY;
+    canvas.addEventListener("mousemove", mouseMove);
+    document.addEventListener("mouseup", mouseUp);
+    function mouseMove(evt) {
+        var dx = evt.clientX - prevX;
+        var dy = evt.clientY - prevY;
+        rotateX += dy / 200;
+        rotateY += dx / 200;
+        prevX = evt.clientX;
+        prevY = evt.clientY;
+        draw();
+    }
+    function mouseUp(evt) {
+        canvas.removeEventListener("mousemove", mouseMove);
+        document.removeEventListener("mouseup", mouseUp);
+    }
+}
+
+function frame() {
+    if (animating) {
+        frameNumber += 1;
+        draw();
+        requestAnimationFrame(frame);
+    }
+}
+
+function setIsAnimating() {
+    var run = document.getElementById("animCheck").checked;
+    if (run != animating) {
+        animating = run;
+        if (animating)
+            requestAnimationFrame(frame);
+    }
+}
+
+function init() {
+    // Sprawdzenie czy załadowano zewnętrzne skrypty WebGL
+    if (typeof mat4 === 'undefined' || typeof createModel === 'undefined') {
+        document.getElementById("error-alert").style.display = "block";
+        return;
+    }
+
+    try {
+        canvas = document.getElementById("webglcanvas");
+        gl = canvas.getContext("webgl");
+        if (!gl) {
+            throw "Browser does not support WebGL";
+        }
+    } catch (e) {
+        document.getElementById("message").innerHTML = "<p>Sorry, could not get a WebGL graphics context.</p>";
+        return;
+    }
+    
+    projection = mat4.create();
+    modelview = mat4.create();
+    normalMatrix = mat3.create();
+
+    try {
+        initGL();
+    } catch (e) {
+        document.getElementById("message").innerHTML = "<p>Sorry, could not initialize the WebGL graphics context:" + e + "</p>";
+        return;
+    }
+
+    document.getElementById("animCheck").checked = false;
+    document.getElementById("animCheck").addEventListener("change", setIsAnimating);
+    document.getElementById("reset").addEventListener("click", function() { rotateX = rotateY = 0; draw(); });
+    canvas.addEventListener("mousedown", mouseDown);
+
+    modelCone = createModel(uvCone());
+    modelCylinder = createModel(uvCylinder());
+    modelCube = createModel(cube());
+    
+    // Próba załadowania modelu czajnika
+    try {
+        if (typeof teapotModel !== "undefined") {
+            modelTeapot = createModel(teapotModel);
+        } else if (typeof uvTeapot !== "undefined") {
+            modelTeapot = createModel(uvTeapot());
+        }
+    } catch (e) {
+        console.log("Teapot model not found, skipping.");
+    }
+
+    draw();
+}
+</script>
+</head>
+<body onload="init()">
+
+<h2>DiskWorld 2: WebGL Windmill</h2>
+
+<noscript><hr><h3>This page requires Javascript and a web browser that supports WebGL</h3><hr></noscript>
+
+<div id="error-alert">
+    CRITICAL ERROR: Błąd ładowania skryptów.<br>
+    Upewnij się, że pliki <i>gl-matrix.js</i> oraz <i>basic-object-models-IFS.js</i> znajdują się wewnątrz katalogu <b>resources/</b> tuż obok tego pliku HTML.
+</div>
+
+<p id="message">Drag your mouse on the model to rotate it.</p>
+
+<p>
+   <label><input type="checkbox" id="animCheck">Animate</label>
+   <button id="reset" style="margin-left:40px">Reset</button>
+</p>
+
+<div>
+    <canvas width=800 height=800 id="webglcanvas"></canvas>
+</div>
 </body>
 </html>
