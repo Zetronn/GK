@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <title>Wiatrak - WebGL</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+    <script type="module">
+        import * as THREE from 'three';
+        import { TeapotGeometry } from 'three/addons/geometries/TeapotGeometry.js';
+
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0xadd8e6);
+
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 100);
+        camera.position.set(0, 5, 12);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        const ambientLight = new THREE.AmbientLight(0x666666);
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(0xffffff, 1);
+        dirLight.position.set(5, 10, 5);
+        scene.add(dirLight);
+
+        const matWood = new THREE.MeshPhongMaterial({ color: 0x8b4513 });
+        const matBlade = new THREE.MeshPhongMaterial({ color: 0xeeeeee });
+        const matTeapot = new THREE.MeshPhongMaterial({ color: 0xff0000 });
+
+        const baseGeo = new THREE.BoxGeometry(5, 0.5, 5);
+        const baseMesh = new THREE.Mesh(baseGeo, matWood);
+        scene.add(baseMesh);
+
+        const towerGeo = new THREE.CylinderGeometry(0.5, 1, 5, 16);
+        const towerMesh = new THREE.Mesh(towerGeo, matWood);
+        towerMesh.position.set(0, 2.75, 0);
+        scene.add(towerMesh);
+
+        const rotor = new THREE.Group();
+        rotor.position.set(0, 5, 0.6);
+        scene.add(rotor);
+
+        const hubGeo = new THREE.CylinderGeometry(0.3, 0.3, 0.4, 16);
+        const hubMesh = new THREE.Mesh(hubGeo, matWood);
+        hubMesh.rotation.x = Math.PI / 2;
+        rotor.add(hubMesh);
+
+        for (let i = 0; i < 3; i++) {
+            const bladeGroup = new THREE.Group();
+
+            const cone1Geo = new THREE.ConeGeometry(0.2, 2.5, 16);
+            const cone1 = new THREE.Mesh(cone1Geo, matBlade);
+            cone1.position.set(0, 1.45, 0);
+
+            const cone2Geo = new THREE.ConeGeometry(0.2, 0.4, 16);
+            const cone2 = new THREE.Mesh(cone2Geo, matBlade);
+            cone2.rotation.z = Math.PI;
+            cone2.position.set(0, 0, 0);
+
+            bladeGroup.add(cone1);
+            bladeGroup.add(cone2);
+
+            bladeGroup.rotation.z = i * ((2 * Math.PI) / 3);
+            rotor.add(bladeGroup);
+        }
+
+        const teapotGeo = new TeapotGeometry(0.5);
+        const teapotMesh = new THREE.Mesh(teapotGeo, matTeapot);
+        teapotMesh.position.set(1.5, 0.75, 1.5);
+        scene.add(teapotMesh);
+
+        renderer.setAnimationLoop(() => {
+            rotor.rotation.z += 0.02;
+            renderer.render(scene, camera);
+        });
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
