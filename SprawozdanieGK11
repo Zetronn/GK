@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="UTF-8">
+<title>SDF Operations</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #000; overflow: hidden; }
+  canvas { display: block; }
+  #ui { position: absolute; top: 15px; left: 15px; z-index: 10; display: flex; gap: 10px; }
+  button { padding: 8px 16px; font-family: sans-serif; cursor: pointer; border: none; border-radius: 4px; background: #fff; }
+  button:hover { background: #ddd; }
+</style>
+</head>
+<body>
+<div id="ui">
+  <button id="btn-0">Suma</button>
+  <button id="btn-1">Przecięcie</button>
+  <button id="btn-2">Różnica</button>
+</div>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.module.js"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from 'three';
+
+const scene = new THREE.Scene();
+const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(window.devicePixelRatio);
+document.body.appendChild(renderer.domElement);
+
+const vertexShader = `
+void main() {
+  gl_Position = vec4(position, 1.0);
+}
+`;
+
+const fragmentShader = `
+uniform vec2 u_resolution;
+uniform float u_time;
+uniform int u_op;
+
+float sdCircle(vec2 p, float r) {
+  return length(p) - r;
+}
+
+float sdBox(vec2 p, vec2 b) {
+  vec2 q = abs(p) - b;
+  return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0);
+}
+
+mat2 rotate2d(float _angle){
+    return mat2(cos(_angle),-sin(_angle),
+                sin(_angle),cos(_angle));
+}
+
+void main() {
+  vec2 uv = (gl_FragCoord.xy - 0.5 * u_resolution.xy) / u_resolution.y;
+
+  vec2 p1 = uv - vec2(sin(u_time * 1.9) * 0.5, cos(u_time * 1.9) * 0.3);
+  float d1 = sdCircle(p1, 0.35);
+
+  vec2 p2 = uv;
+  p2 = rotate2d(u_time * 1.9) * p2;
+  float d2 = sdBox(p2, vec2(0.4, 0.25));
+
+  float d = 0.0;
+  if (u_op == 0) {
+    d = min(d1, d2);
+  } else if (u_op == 1) {
+    d = max(d1, d2);
+  } else if (u_op == 2) {
+    d = max(d1, -d2);
+  }
+
+  vec3 col = vec3(0.05, 0.05, 0.1);
+  if (d < 0.0) {
+    col = vec3(0.9, 0.3, 0.5);
+  }
+
+  col = mix(col, vec3(1.0), 1.0 - smoothstep(0.0, 0.005, abs(d)));
+
+  gl_FragColor = vec4(col, 1.0);
+}
+`;
+
+const geometry = new THREE.PlaneGeometry(2, 2);
+const material = new THREE.ShaderMaterial({
+  vertexShader,
+  fragmentShader,
+  uniforms: {
+    u_resolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
+    u_time: { value: 0.0 },
+    u_op: { value: 0 }
+  }
+});
+
+scene.add(new THREE.Mesh(geometry, material));
+
+document.getElementById('btn-0').addEventListener('click', () => { material.uniforms.u_op.value = 0; });
+document.getElementById('btn-1').addEventListener('click', () => { material.uniforms.u_op.value = 1; });
+document.getElementById('btn-2').addEventListener('click', () => { material.uniforms.u_op.value = 2; });
+
+window.addEventListener('resize', () => {
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  material.uniforms.u_resolution.value.set(window.innerWidth, window.innerHeight);
+});
+
+const clock = new THREE.Clock();
+function animate() {
+  requestAnimationFrame(animate);
+  material.uniforms.u_time.value = clock.getElapsedTime();
+  renderer.render(scene, camera);
+}
+animate();
+</script>
+</body>
+</html>
